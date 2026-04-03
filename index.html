@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>團隊帳務透明系統</title>
+    <title>團隊帳務透明系統 - 專業管理版</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel CDN -->
@@ -16,6 +16,7 @@
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
         body {
             font-family: 'Noto Sans TC', sans-serif;
+            -webkit-font-smoothing: antialiased;
         }
         .shake {
             animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
@@ -26,6 +27,11 @@
             30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
             40%, 60% { transform: translate3d(4px, 0, 0); }
         }
+        /* 美化滾動條 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -37,7 +43,7 @@
         // --- 配置區 ---
         const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxZ5IpQpZ-rK50hPeMh3t4VJTdcZeENbipV8xs8bLvRpynhcYJtV5QJWg6nDFZbgsHhWA/exec"; 
 
-        // 封裝 Lucide 圖標組件以便在 React 中使用
+        // 封裝 Lucide 圖標組件
         const Icon = ({ name, size = 18, className = "" }) => {
             useEffect(() => {
                 lucide.createIcons();
@@ -55,12 +61,17 @@
             const [isMenuOpen, setIsMenuOpen] = useState(false);
             const [error, setError] = useState(null);
             const [successMsg, setSuccessMsg] = useState(null);
+            const [lastSync, setLastSync] = useState(null);
 
             // 管理員狀態
             const [isAdmin, setIsAdmin] = useState(false);
             const [passwordInput, setPasswordInput] = useState('');
             const [showLoginModal, setShowLoginModal] = useState(false);
             const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+            // 篩選器狀態
+            const [filterCategory, setFilterCategory] = useState('全部');
+            const [filterMethod, setFilterMethod] = useState('全部');
 
             // 表單狀態
             const [formData, setFormData] = useState({
@@ -87,9 +98,28 @@
                 } catch (e) { return dateStr; }
             };
 
+            // 匯出 CSV 邏輯
+            const downloadCSV = (data, filename) => {
+                if (!data || data.length === 0) return;
+                const headers = Object.keys(data[0]).join(',');
+                const rows = data.map(row => 
+                    Object.values(row).map(val => `"${val.toString().replace(/"/g, '""')}"`).join(',')
+                ).join('\n');
+                
+                const csvContent = "\uFEFF" + headers + '\n' + rows; // 加入 BOM 避免 Excel 亂碼
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", `${filename}_${new Date().toLocaleDateString()}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
             useEffect(() => {
                 if (view === 'admin_view' || view === 'home' || view === 'admin_yearly') fetchAccounting();
-                if (view === 'admin_reports' || ((view === 'admin_entry' || view === 'admin_yearly') && isAdmin)) {
+                if (view === 'admin_reports' || view === 'admin_members' || ((view === 'admin_entry' || view === 'admin_yearly') && isAdmin)) {
                     fetchAllMembers();
                 }
             }, [view, isAdmin]);
@@ -100,7 +130,10 @@
                 try {
                     const response = await fetch(`${GAS_WEB_APP_URL}?action=getAccounting`);
                     const result = await response.json();
-                    if (result.success) setAccountingData(result.data);
+                    if (result.success) {
+                        setAccountingData(result.data);
+                        setLastSync(new Date());
+                    }
                 } catch (err) { setError("讀取流水帳失敗"); }
                 finally { setIsLoading(false); }
             };
@@ -111,20 +144,43 @@
                 try {
                     const response = await fetch(`${GAS_WEB_APP_URL}?action=getAllMembers`);
                     const result = await response.json();
-                    if (result.success) setAllMembersData(result.data);
+                    if (result.success) {
+                        setAllMembersData(result.data);
+                        setLastSync(new Date());
+                    }
                 } catch (err) { setError("讀取成員列表失敗"); }
                 finally { setIsLoading(false); }
             };
 
-            const uniqueMembers = useMemo(() => {
-                const memberMap = new Map();
+            // 提取不重複的成員資訊與貢獻統計
+            const memberStats = useMemo(() => {
+                const stats = {};
                 allMembersData.forEach(m => {
-                    if (m.MemberID && !memberMap.has(m.MemberID)) {
-                        memberMap.set(m.MemberID, m.Name);
+                    if (!m.MemberID) return;
+                    if (!stats[m.MemberID]) {
+                        stats[m.MemberID] = { 
+                            id: m.MemberID, 
+                            name: m.Name, 
+                            totalPaid: 0, 
+                            count: 0,
+                            lastPaid: '' 
+                        };
+                    }
+                    if (m.Status === '已繳') {
+                        stats[m.MemberID].totalPaid += Number(m.Amount || 0);
+                        stats[m.MemberID].count += 1;
+                        const dateKey = `${m.Year}/${m.Month}`;
+                        if (!stats[m.MemberID].lastPaid || dateKey > stats[m.MemberID].lastPaid) {
+                            stats[m.MemberID].lastPaid = dateKey;
+                        }
                     }
                 });
-                return Array.from(memberMap.entries()).map(([id, name]) => ({ id, name }));
+                return Object.values(stats).sort((a, b) => b.totalPaid - a.totalPaid);
             }, [allMembersData]);
+
+            const uniqueMembers = useMemo(() => {
+                return memberStats.map(s => ({ id: s.id, name: s.name }));
+            }, [memberStats]);
 
             const yearlyAnalytics = useMemo(() => {
                 const targetYear = Number(selectedYear);
@@ -202,6 +258,14 @@
                 return { income, expense, balance: income - expense };
             }, [accountingData, selectedYear]);
 
+            const filteredAccounting = useMemo(() => {
+                return accountingData.filter(item => {
+                    const catMatch = filterCategory === '全部' || item.Category === filterCategory;
+                    const methodMatch = filterMethod === '全部' || item.PaymentMethod === filterMethod;
+                    return catMatch && methodMatch;
+                });
+            }, [accountingData, filterCategory, filterMethod]);
+
             const handleSearch = async () => {
                 if (!searchQuery.trim() || !GAS_WEB_APP_URL) return;
                 setIsLoading(true);
@@ -246,7 +310,7 @@
             const NavButton = ({ id, label, icon }) => (
                 <button 
                     onClick={() => { 
-                        if ((id === 'admin_entry' || id === 'admin_yearly') && !isAdmin) {
+                        if ((id === 'admin_entry' || id === 'admin_yearly' || id === 'admin_members') && !isAdmin) {
                             setShowLoginModal(true);
                         } else {
                             setView(id); 
@@ -255,7 +319,7 @@
                         }
                     }}
                     className={`flex items-center gap-3 px-5 py-3 rounded-2xl transition-all duration-300 font-bold ${
-                        view === id ? 'bg-blue-600 text-white shadow-lg' : id === 'admin_entry' ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' : 'text-slate-500 hover:bg-slate-100'
+                        view === id ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : (id === 'admin_entry' || id === 'admin_members') ? 'text-blue-600 bg-blue-50 hover:bg-blue-100' : 'text-slate-500 hover:bg-slate-100'
                     }`}
                 >
                     <Icon name={icon} /><span>{label}</span>
@@ -268,22 +332,22 @@
                     {/* 登入 Modal */}
                     {showLoginModal && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
-                            <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl scale-in-center">
+                            <div className="bg-white rounded-[2rem] p-8 w-full max-w-md shadow-2xl">
                                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6">
                                     <Icon name="lock" size={32} />
                                 </div>
-                                <h3 className="text-2xl font-black mb-2">管理員驗證</h3>
-                                <p className="text-slate-500 mb-6 font-medium">請輸入密碼以存取受保護的功能。</p>
+                                <h3 className="text-2xl font-black mb-2 text-slate-800">管理員授權</h3>
+                                <p className="text-slate-500 mb-6 font-medium">存取深度分析與寫入權限需要身分證實。</p>
                                 <input 
-                                    type="password" autoFocus placeholder="輸入密碼" 
+                                    type="password" autoFocus placeholder="請輸入管理密碼" 
                                     value={passwordInput}
                                     onChange={(e) => setPasswordInput(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
-                                    className="w-full px-6 py-4 bg-slate-50 rounded-2xl border-2 border-transparent focus:border-blue-600 outline-none mb-4 font-bold"
+                                    className="w-full px-6 py-4 bg-slate-50 rounded-2xl border-2 border-transparent focus:border-blue-600 outline-none mb-4 font-bold text-lg"
                                 />
                                 <div className="flex gap-3">
-                                    <button onClick={() => setShowLoginModal(false)} className="flex-1 py-4 font-bold text-slate-400">取消</button>
-                                    <button onClick={handleAdminLogin} className="flex-1 bg-blue-600 text-white rounded-2xl font-black shadow-xl">驗證</button>
+                                    <button onClick={() => setShowLoginModal(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600">取消</button>
+                                    <button onClick={handleAdminLogin} className="flex-1 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 transition-all hover:bg-blue-700">確認</button>
                                 </div>
                             </div>
                         </div>
@@ -295,14 +359,15 @@
                                 <div className="bg-blue-600 p-2 rounded-xl text-white">
                                     <Icon name="trending-up" size={22} />
                                 </div>
-                                <span className="font-black text-xl tracking-tight text-slate-800">團隊帳務<span className="text-blue-600">管理</span></span>
+                                <span className="font-black text-xl tracking-tight text-slate-800">團隊帳務<span className="text-blue-600">管理系統</span></span>
                             </div>
                             <div className="hidden lg:flex items-center gap-1">
-                                <NavButton id="home" label="總覽" icon="wallet" />
+                                <NavButton id="home" label="總覽" icon="layout" />
                                 <NavButton id="member_query" label="月助查詢" icon="search" />
                                 <NavButton id="admin_view" label="收支明細" icon="file-text" />
                                 <NavButton id="admin_reports" label="自動對帳" icon="history" />
-                                <NavButton id="admin_yearly" label="年度報告" icon="bar-chart-3" />
+                                <NavButton id="admin_members" label="成員清單" icon="users" />
+                                <NavButton id="admin_yearly" label="年度報告" icon="pie-chart" />
                                 <div className="w-px h-6 bg-slate-200 mx-2"></div>
                                 <NavButton id="admin_entry" label="帳務登錄" icon="plus-circle" />
                             </div>
@@ -312,12 +377,13 @@
                         </div>
                         {isMenuOpen && (
                             <div className="lg:hidden absolute top-full left-0 w-full bg-white border-b border-slate-200 p-6 flex flex-col gap-2 shadow-2xl">
-                                <NavButton id="home" label="總覽" icon="wallet" />
+                                <NavButton id="home" label="總覽" icon="layout" />
                                 <NavButton id="member_query" label="月助查詢" icon="search" />
                                 <NavButton id="admin_view" label="收支明細" icon="file-text" />
                                 <NavButton id="admin_reports" label="自動對帳" icon="history" />
-                                <NavButton id="admin_yearly" label="年度報告" icon="bar-chart-3" />
-                                <NavButton id="admin_entry" label="管理登錄" icon="plus-circle" />
+                                <NavButton id="admin_members" label="成員管理" icon="users" />
+                                <NavButton id="admin_yearly" label="年度報告" icon="pie-chart" />
+                                <NavButton id="admin_entry" label="新增紀錄" icon="plus-circle" />
                             </div>
                         )}
                     </nav>
@@ -327,96 +393,150 @@
                         {error && <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-between text-rose-600 font-bold shake"><div className="flex items-center gap-2"><Icon name="alert-circle" /> {error}</div><button onClick={() => setError(null)}><Icon name="x" size={18} /></button></div>}
                         
                         {view === 'home' && (
-                            <div className="space-y-8">
-                                <div className="bg-slate-900 rounded-[2.5rem] p-12 text-white shadow-2xl relative overflow-hidden">
+                            <div className="space-y-8 animate-in fade-in duration-500">
+                                <div className="bg-slate-900 rounded-[2.5rem] p-12 text-white shadow-2xl relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/20 rounded-full -mr-20 -mt-20 blur-3xl group-hover:bg-blue-600/30 transition-all duration-700"></div>
                                     <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                                        <div><p className="text-slate-400 mb-2">{selectedYear} 年度累計結餘</p><h2 className="text-6xl font-black tabular-nums">${stats.balance.toLocaleString()}</h2></div>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
-                                                <p className="text-emerald-400 text-xs font-bold uppercase mb-1">總收入</p>
-                                                <p className="text-2xl font-bold">+{stats.income.toLocaleString()}</p>
+                                        <div>
+                                            <p className="text-slate-400 mb-2 font-bold uppercase tracking-widest">{selectedYear} 年度累計結餘</p>
+                                            <h2 className="text-7xl font-black tabular-nums tracking-tighter">
+                                                <span className="text-3xl font-normal text-slate-500 mr-2">$</span>
+                                                {stats.balance.toLocaleString()}
+                                            </h2>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 w-full md:w-auto">
+                                            <div className="bg-white/5 p-6 rounded-3xl border border-white/10 backdrop-blur-sm">
+                                                <p className="text-emerald-400 text-xs font-black uppercase mb-1 flex items-center gap-1"><Icon name="arrow-up-right" size={12}/> 總收入</p>
+                                                <p className="text-3xl font-black text-white">+{stats.income.toLocaleString()}</p>
                                             </div>
-                                            <div className="bg-white/5 p-5 rounded-2xl border border-white/10">
-                                                <p className="text-rose-400 text-xs font-bold uppercase mb-1">總支出</p>
-                                                <p className="text-2xl font-bold">-{stats.expense.toLocaleString()}</p>
+                                            <div className="bg-white/5 p-6 rounded-3xl border border-white/10 backdrop-blur-sm">
+                                                <p className="text-rose-400 text-xs font-black uppercase mb-1 flex items-center gap-1"><Icon name="arrow-down-left" size={12}/> 總支出</p>
+                                                <p className="text-3xl font-black text-white">-{stats.expense.toLocaleString()}</p>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                    <div onClick={() => setView('member_query')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-blue-500 cursor-pointer shadow-sm transition-all"><Icon name="search" size={32} className="mb-4 text-blue-600"/><h3 className="font-black text-2xl mb-2">個人查詢</h3><p className="text-slate-500">輸入姓名或 ID 查詢年度繳費狀況。</p></div>
-                                    <div onClick={() => setView('admin_reports')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-rose-500 cursor-pointer shadow-sm transition-all"><Icon name="history" size={32} className="mb-4 text-rose-600"/><h3 className="font-black text-2xl mb-2">自動對帳</h3><p className="text-slate-500">智能偵測 2026 年起的漏繳月份。</p></div>
-                                    <div onClick={() => setView('admin_yearly')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-indigo-500 cursor-pointer shadow-sm transition-all"><Icon name="bar-chart-3" size={32} className="mb-4 text-indigo-600"/><h3 className="font-black text-2xl mb-2">年度分析</h3><p className="text-slate-500">掌握全年度資金波動與成員貢獻。</p></div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                    <div onClick={() => setView('member_query')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-blue-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="search" size={32} className="mb-4 text-blue-600"/><h3 className="font-black text-xl mb-2 text-slate-800">個人查詢</h3><p className="text-slate-500 text-sm">輸入姓名或 ID 查詢年度繳費狀況。</p></div>
+                                    <div onClick={() => setView('admin_reports')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-rose-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="history" size={32} className="mb-4 text-rose-600"/><h3 className="font-black text-xl mb-2 text-slate-800">自動對帳</h3><p className="text-slate-500 text-sm">智能偵測漏繳月份與待補金額。</p></div>
+                                    <div onClick={() => setView('admin_members')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-indigo-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="users" size={32} className="mb-4 text-indigo-600"/><h3 className="font-black text-xl mb-2 text-slate-800">成員管理</h3><p className="text-slate-500 text-sm">查看所有成員的歷史貢獻總額。</p></div>
+                                    <div onClick={() => setView('admin_yearly')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-amber-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="pie-chart" size={32} className="mb-4 text-amber-600"/><h3 className="font-black text-xl mb-2 text-slate-800">年度分析</h3><p className="text-slate-500 text-sm">全年度資金趨勢與類別圓餅圖。</p></div>
                                 </div>
-                            </div>
-                        )}
-
-                        {view === 'member_query' && (
-                            <div className="space-y-6">
-                                <div className="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-8 md:p-10">
-                                    <h2 className="text-3xl font-black mb-8 flex items-center gap-3"><Icon name="search" size={32} className="text-blue-600" /> 個人查詢</h2>
-                                    <div className="flex flex-col sm:flex-row gap-4">
-                                        <input type="text" placeholder="輸入 ID 或 姓名" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} className="flex-1 pl-6 pr-6 py-5 bg-slate-50 rounded-2xl border-2 border-transparent focus:border-blue-600 outline-none font-bold text-lg" />
-                                        <button onClick={handleSearch} disabled={isLoading} className="bg-blue-600 text-white px-10 py-5 rounded-2xl font-black shadow-xl">立即查詢</button>
-                                    </div>
-                                </div>
-                                {memberData && memberData.length > 0 && (
-                                    <div className="space-y-4">
-                                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 rounded-3xl text-white shadow-xl flex justify-between items-center">
-                                            <h3 className="text-3xl font-black">{memberData[0].Name} <span className="text-sm opacity-70">({memberData[0].MemberID})</span></h3>
-                                            <div className="bg-white/20 rounded-2xl px-6 py-3 border border-white/20"><p className="text-2xl font-black">{memberData.length} 筆紀錄</p></div>
-                                        </div>
-                                        {memberData.map((item, idx) => (
-                                            <div key={idx} className="bg-white p-6 rounded-2xl border border-slate-200 flex justify-between items-center hover:shadow-md transition-all">
-                                                <div className="flex items-center gap-5">
-                                                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${item.Status === '已繳' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                                        <Icon name={item.Status === '已繳' ? "check-circle" : "clock"} size={28} />
-                                                    </div>
-                                                    <div><div className="font-black text-xl">{item.Year}年 {item.Month}月份</div><div className="text-xs text-slate-400 mt-1">更新日期：{formatDisplayDate(item.Date)}</div></div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div className="text-2xl font-black">${Number(item.Amount).toLocaleString()}</div>
-                                                    <div className="text-xs font-bold text-slate-400">{item.PaymentMethod || "現金"}</div>
-                                                    <div className={`text-sm font-bold ${item.Status === '已繳' ? 'text-emerald-600' : 'text-amber-600'}`}>{item.Status}</div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         )}
 
                         {view === 'admin_view' && (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-end">
-                                    <h2 className="text-4xl font-black text-slate-800">收支明細</h2>
-                                    <button onClick={fetchAccounting} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm">
-                                        <Icon name="refresh-ccw" className={isLoading ? 'animate-spin text-blue-600' : 'text-slate-600'} />
-                                    </button>
+                            <div className="space-y-6 animate-in slide-in-from-bottom-8">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+                                    <div><h2 className="text-4xl font-black text-slate-800">收支明細</h2><p className="text-slate-500 font-medium">記錄每一筆公開透明的資金流向</p></div>
+                                    <div className="flex gap-2 w-full md:w-auto">
+                                        <button onClick={() => downloadCSV(accountingData, 'TeamAccounting')} className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm">
+                                            <Icon name="download" size={16}/> 匯出報表
+                                        </button>
+                                        <button onClick={fetchAccounting} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm">
+                                            <Icon name="refresh-ccw" className={isLoading ? 'animate-spin text-blue-600' : 'text-slate-600'} />
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
+
+                                {/* 篩選區 */}
+                                <div className="bg-white p-4 rounded-3xl border border-slate-200 flex flex-wrap gap-4 items-center">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-black text-slate-400 uppercase ml-2">類別</span>
+                                        <select value={filterCategory} onChange={(e)=>setFilterCategory(e.target.value)} className="bg-slate-50 px-3 py-2 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-blue-600">
+                                            <option>全部</option><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-black text-slate-400 uppercase ml-2">管道</span>
+                                        <select value={filterMethod} onChange={(e)=>setFilterMethod(e.target.value)} className="bg-slate-50 px-3 py-2 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-blue-600">
+                                            <option>全部</option><option>現金</option><option>郵局</option><option>轉帳</option><option>LinePay</option>
+                                        </select>
+                                    </div>
+                                    <div className="ml-auto text-xs text-slate-400 font-bold">
+                                        顯示 {filteredAccounting.length} 筆紀錄
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-left">
-                                            <thead className="bg-slate-50 border-b border-slate-100">
+                                            <thead className="bg-slate-50/80 border-b border-slate-100">
                                                 <tr>
-                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400">日期</th>
-                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400">交易項目</th>
-                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 text-right">金額</th>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 tracking-widest">日期</th>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 tracking-widest">交易項目</th>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 tracking-widest text-right">金額</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
-                                                {accountingData.map((row, idx) => (
+                                                {filteredAccounting.map((row, idx) => (
                                                     <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
-                                                        <td className="px-8 py-6 font-black">{formatDisplayDate(row.Date)}</td>
+                                                        <td className="px-8 py-6 font-black text-slate-600">{formatDisplayDate(row.Date)}</td>
                                                         <td className="px-8 py-6">
                                                             <div className="flex items-center gap-2">
-                                                                <span className="px-2 py-0.5 rounded border border-slate-200 text-[10px] font-black uppercase tracking-widest bg-slate-50">{row.Category}</span>
-                                                                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-tighter">{row.PaymentMethod || "現金"}</span>
+                                                                <span className="px-2 py-0.5 rounded border border-slate-200 text-[10px] font-black uppercase tracking-widest bg-white shadow-sm">{row.Category}</span>
+                                                                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded uppercase">{row.PaymentMethod || "現金"}</span>
                                                             </div>
                                                             <div className="text-sm font-bold mt-1.5 text-slate-700">{row.Description}</div>
                                                         </td>
-                                                        <td className={`px-8 py-6 text-right font-black text-xl tabular-nums ${row.Amount > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                                        <td className={`px-8 py-6 text-right font-black text-2xl tabular-nums ${row.Amount > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                                                             {row.Amount > 0 ? `+${Number(row.Amount).toLocaleString()}` : Number(row.Amount).toLocaleString()}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {filteredAccounting.length === 0 && (
+                                                    <tr><td colSpan="3" className="px-8 py-20 text-center text-slate-400 font-bold">找不到相符的紀錄。</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'admin_members' && (
+                            <div className="space-y-6 animate-in slide-in-from-bottom-8">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+                                    <div><h2 className="text-4xl font-black text-slate-800">成員管理</h2><p className="text-slate-500 font-medium text-lg">掌握每一位成員的支持力量</p></div>
+                                    <button onClick={() => downloadCSV(memberStats, 'MemberContributions')} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-100">
+                                        <Icon name="download" size={16}/> 匯出名冊
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="bg-indigo-600 rounded-[2rem] p-8 text-white shadow-xl">
+                                        <p className="text-indigo-200 text-xs font-black uppercase mb-1">註冊成員數</p>
+                                        <p className="text-4xl font-black tabular-nums">{memberStats.length} <span className="text-lg font-normal opacity-60">位</span></p>
+                                    </div>
+                                    <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm md:col-span-2">
+                                        <p className="text-slate-400 text-xs font-black uppercase mb-1">總入帳筆數</p>
+                                        <p className="text-4xl font-black tabular-nums text-indigo-600">{memberStats.reduce((a,b)=>a+b.count,0)} <span className="text-lg font-normal text-slate-400">筆歷史紀錄</span></p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-slate-50/80 border-b border-slate-100">
+                                                <tr>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400">ID / 姓名</th>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 text-center">最後繳費</th>
+                                                    <th className="px-8 py-5 text-xs font-black uppercase text-slate-400 text-right">累計金額</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {memberStats.map((m, idx) => (
+                                                    <tr key={idx} className="hover:bg-indigo-50/30 transition-colors">
+                                                        <td className="px-8 py-6">
+                                                            <div className="font-black text-slate-800 text-lg">{m.name}</div>
+                                                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{m.id}</div>
+                                                        </td>
+                                                        <td className="px-8 py-6 text-center">
+                                                            <span className="px-3 py-1 bg-slate-100 rounded-lg text-xs font-black text-slate-600">{m.lastPaid || '無紀錄'}</span>
+                                                            <div className="text-[10px] text-slate-400 mt-1 font-bold">累計 {m.count} 次</div>
+                                                        </td>
+                                                        <td className="px-8 py-6 text-right font-black text-2xl text-indigo-600 tabular-nums">
+                                                            ${m.totalPaid.toLocaleString()}
                                                         </td>
                                                     </tr>
                                                 ))}
@@ -427,65 +547,112 @@
                             </div>
                         )}
 
-                        {view === 'admin_reports' && (
-                            <div className="space-y-8">
-                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                    <div>
-                                        <h2 className="text-3xl font-black flex items-center gap-3"><Icon name="history" size={32} className="text-blue-600" /> 漏繳自動追蹤系統</h2>
-                                        <p className="text-slate-500 font-medium mt-1">比對名冊與紀錄，自動列出缺失月份。</p>
+                        {/* 以下頁面邏輯保持不變，但同步美化 UI */}
+                        {view === 'member_query' && (
+                            <div className="space-y-6 animate-in slide-in-from-bottom-8">
+                                <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 p-8 md:p-12">
+                                    <h2 className="text-4xl font-black mb-8 flex items-center gap-3 text-slate-800"><Icon name="search" size={40} className="text-blue-600" /> 個人月助查詢</h2>
+                                    <div className="flex flex-col sm:flex-row gap-4">
+                                        <div className="relative flex-1 group">
+                                            <Icon name="user" className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={24}/>
+                                            <input type="text" placeholder="請輸入 ID 或 姓名" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} className="w-full pl-16 pr-8 py-6 bg-slate-50 rounded-3xl border-2 border-transparent focus:border-blue-600 focus:bg-white outline-none font-bold text-xl transition-all shadow-inner" />
+                                        </div>
+                                        <button onClick={handleSearch} disabled={isLoading} className="bg-blue-600 text-white px-12 py-6 rounded-3xl font-black text-xl shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50">
+                                            {isLoading ? "搜尋中..." : "立即查詢"}
+                                        </button>
                                     </div>
-                                    <button onClick={fetchAllMembers} className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold shadow-sm transition-all">
-                                        <Icon name="refresh-ccw" size={18} className={isLoading ? 'animate-spin' : ''} />
-                                        <span>更新偵測數據</span>
-                                    </button>
+                                    <p className="mt-6 text-slate-400 text-sm font-medium flex items-center gap-2"><Icon name="info" size={14}/> 提示：您可以輸入如 M001 或 完整的成員姓名來檢索紀錄。</p>
+                                </div>
+                                {memberData && memberData.length > 0 && (
+                                    <div className="space-y-4">
+                                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-10 rounded-[2.5rem] text-white shadow-xl flex justify-between items-center">
+                                            <div>
+                                                <p className="text-blue-100 text-xs font-black uppercase tracking-widest mb-1">Authenticated Member</p>
+                                                <h3 className="text-4xl font-black">{memberData[0].Name} <span className="text-xl font-normal opacity-70 ml-2">({memberData[0].MemberID})</span></h3>
+                                            </div>
+                                            <div className="bg-white/20 px-8 py-4 rounded-3xl backdrop-blur-md border border-white/10 text-center">
+                                                <p className="text-xs font-black mb-1">年度累計繳費</p>
+                                                <p className="text-3xl font-black">{memberData.filter(i=>i.Status==='已繳').length} <span className="text-sm font-normal">次</span></p>
+                                            </div>
+                                        </div>
+                                        {memberData.map((item, idx) => (
+                                            <div key={idx} className="bg-white p-8 rounded-[2rem] border border-slate-200 flex flex-col md:flex-row justify-between items-center hover:shadow-lg transition-all">
+                                                <div className="flex items-center gap-6 w-full md:w-auto">
+                                                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner ${item.Status === '已繳' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                        <Icon name={item.Status === '已繳' ? "check-circle" : "clock"} size={32} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="font-black text-2xl text-slate-800">{item.Year}年 {item.Month}月份</div>
+                                                        <div className="text-sm text-slate-400 font-bold mt-1">核對日期：{formatDisplayDate(item.Date)}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center justify-between md:justify-end gap-10 w-full md:w-auto mt-6 md:mt-0 border-t md:border-none pt-6 md:pt-0">
+                                                    <div className="text-left md:text-right">
+                                                        <p className="text-xs font-black text-slate-400 mb-1 uppercase tracking-tighter">Amount ({item.PaymentMethod || 'Cash'})</p>
+                                                        <div className="text-3xl font-black tabular-nums text-slate-800">${Number(item.Amount).toLocaleString()}</div>
+                                                    </div>
+                                                    <div className={`px-5 py-2 rounded-xl text-sm font-black border-2 ${item.Status === '已繳' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>{item.Status}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* 自動對帳與年度報告邏輯相同，僅美化部分... */}
+                        {view === 'admin_reports' && (
+                            <div className="space-y-8 animate-in slide-in-from-bottom-8">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                   <div>
+                                     <h2 className="text-3xl font-black flex items-center gap-3 text-slate-800"><Icon name="history" size={32} className="text-blue-600" /> 漏繳自動追蹤</h2>
+                                     <p className="text-slate-500 font-medium mt-1 text-lg">系統自動分析所有成員的應繳與實繳差異</p>
+                                   </div>
+                                   <button onClick={fetchAllMembers} className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 font-black text-slate-600 shadow-sm transition-all">
+                                    <Icon name="refresh-ccw" size={18} className={isLoading ? 'animate-spin text-blue-600' : ''} />
+                                    <span>重新掃描資料庫</span>
+                                  </button>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                                        <p className="text-slate-400 text-xs font-black uppercase mb-2">偵測漏繳人次</p>
-                                        <h4 className="text-4xl font-black text-rose-500">{reportStats.unpaidList.length} <span className="text-sm font-normal text-slate-400">筆</span></h4>
+                                    <div className="bg-rose-600 p-8 rounded-[2rem] text-white shadow-xl">
+                                        <p className="text-rose-200 text-xs font-black uppercase mb-1">偵測漏繳人次</p>
+                                        <h4 className="text-4xl font-black tabular-nums">{reportStats.unpaidList.length} <span className="text-lg font-normal opacity-60">筆紀錄</span></h4>
                                     </div>
-                                    <div className="md:col-span-2 bg-white p-6 rounded-3xl border border-slate-200 shadow-sm overflow-x-auto">
-                                        <p className="text-slate-400 text-xs font-black uppercase mb-4">月助實收統計</p>
-                                        <div className="flex gap-4">
+                                    <div className="md:col-span-2 bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm flex flex-col justify-center">
+                                        <p className="text-slate-400 text-xs font-black uppercase mb-4">近期收繳覆蓋率 (2026起)</p>
+                                        <div className="flex gap-4 overflow-x-auto pb-2">
                                             {Object.entries(reportStats.monthlyData).sort().slice(-6).map(([month, data]) => (
-                                                <div key={month} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex-1 text-center min-w-[100px]">
-                                                    <p className="text-[10px] font-bold text-slate-400 mb-1">{month}</p>
+                                                <div key={month} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex-1 text-center min-w-[120px]">
+                                                    <p className="text-[10px] font-black text-slate-400 mb-1">{month}</p>
                                                     <p className="text-lg font-black text-blue-600">${data.collected.toLocaleString()}</p>
-                                                    <p className="text-[10px] text-slate-400">已收 {data.count} 人</p>
+                                                    <p className="text-[10px] text-slate-400 font-bold">已繳 {data.count} 人</p>
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                 </div>
-                                <div className="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden">
+                                <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
                                     <div className="bg-rose-50 px-8 py-5 border-b border-rose-100 flex justify-between items-center">
-                                        <h3 className="font-black text-rose-700 flex items-center gap-2"><Icon name="alert-circle" /> 2026 年度漏繳清單</h3>
-                                        <span className="text-xs bg-rose-200 text-rose-700 px-3 py-1 rounded-full font-bold">待補金額: ${reportStats.unpaidList.length * 500}</span>
+                                        <h3 className="font-black text-rose-700 flex items-center gap-2 text-lg"><Icon name="alert-circle" size={20}/> 年度漏繳清單 (每筆 $500)</h3>
+                                        <span className="text-xs bg-rose-200 text-rose-700 px-4 py-1.5 rounded-full font-black">待補總額: ${reportStats.unpaidList.length * 500}</span>
                                     </div>
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-left">
                                             <thead className="bg-slate-50/50 border-b border-slate-100">
                                                 <tr>
-                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase">成員編號 / 姓名</th>
-                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase text-center">缺失月份</th>
-                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase text-right">狀態說明</th>
+                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-widest">成員</th>
+                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-widest text-center">缺失月份</th>
+                                                    <th className="px-8 py-4 text-xs font-black text-slate-400 uppercase tracking-widest text-right">說明</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-50">
-                                                {reportStats.unpaidList.length > 0 ? reportStats.unpaidList.map((row, idx) => (
+                                                {reportStats.unpaidList.map((row, idx) => (
                                                     <tr key={idx} className="hover:bg-rose-50/20 transition-colors">
-                                                        <td className="px-8 py-5">
-                                                            <div className="font-black text-slate-800">{row.Name}</div>
-                                                            <div className="text-[10px] text-slate-400 font-bold uppercase">{row.MemberID}</div>
-                                                        </td>
-                                                        <td className="px-8 py-5 text-center">
-                                                            <span className="px-3 py-1 bg-white text-rose-600 border border-rose-100 rounded-lg text-xs font-black">{row.Year}年 {row.Month}月</span>
-                                                        </td>
-                                                        <td className="px-8 py-5 text-right font-black text-slate-400 text-xs italic">{row.Reason}</td>
+                                                        <td className="px-8 py-5"><div className="font-black text-slate-800 text-lg">{row.Name}</div><div className="text-[10px] text-slate-400 font-bold uppercase">{row.MemberID}</div></td>
+                                                        <td className="px-8 py-5 text-center"><span className="px-4 py-1 bg-white text-rose-600 border border-rose-100 rounded-lg text-xs font-black shadow-sm">{row.Year}年 {row.Month}月</span></td>
+                                                        <td className="px-8 py-5 text-right font-bold text-slate-400 text-xs italic">{row.Reason}</td>
                                                     </tr>
-                                                )) : (
-                                                    <tr><td colSpan="3" className="px-8 py-20 text-center text-slate-400 font-bold">目前資料庫完整，無漏繳。</td></tr>
-                                                )}
+                                                ))}
                                             </tbody>
                                         </table>
                                     </div>
@@ -494,90 +661,77 @@
                         )}
 
                         {view === 'admin_yearly' && (
-                            <div className="space-y-8">
+                            <div className="space-y-8 animate-in slide-in-from-bottom-8">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                    <div>
-                                        <h2 className="text-4xl font-black flex items-center gap-3"><Icon name="bar-chart-3" size={36} className="text-blue-600" /> {selectedYear} 年度財務報告</h2>
-                                        <p className="text-slate-500 font-medium mt-1">全年度資金流向分析與成員貢獻統計</p>
-                                    </div>
-                                    <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border shadow-sm w-full md:w-auto">
-                                        <Icon name="calendar" size={18} className="text-slate-400 ml-2" />
-                                        <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-transparent font-black text-slate-700 outline-none pr-4">
-                                            <option value="2026">2026 年度</option>
-                                            <option value="2025">2025 年度</option>
-                                            <option value="2024">2024 年度</option>
+                                    <h2 className="text-4xl font-black flex items-center gap-3 text-slate-800"><Icon name="pie-chart" size={36} className="text-amber-500" /> {selectedYear} 年度財務報告</h2>
+                                    <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm w-full md:w-auto px-4">
+                                        <Icon name="calendar" size={18} className="text-slate-400" />
+                                        <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="bg-transparent font-black text-slate-700 outline-none">
+                                            <option value="2026">2026 年度</option><option value="2025">2025 年度</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden">
-                                        <p className="text-slate-400 text-xs font-bold uppercase mb-2">年度結餘</p>
-                                        <h4 className="text-4xl font-black tabular-nums">${stats.balance.toLocaleString()}</h4>
-                                    </div>
-                                    <div className="bg-white rounded-[2rem] p-8 border shadow-sm border-slate-200">
-                                        <p className="text-slate-400 text-xs font-bold uppercase mb-2">年度總收入</p>
-                                        <h4 className="text-4xl font-black text-emerald-600 tabular-nums">+${stats.income.toLocaleString()}</h4>
-                                    </div>
-                                    <div className="bg-white rounded-[2rem] p-8 border shadow-sm border-slate-200">
-                                        <p className="text-slate-400 text-xs font-bold uppercase mb-2">年度總支出</p>
-                                        <h4 className="text-4xl font-black text-rose-500 tabular-nums">-${stats.expense.toLocaleString()}</h4>
-                                    </div>
+                                    <div className="bg-slate-900 rounded-[2rem] p-8 text-white shadow-xl"><p className="text-slate-400 text-xs font-black uppercase mb-1">年度結餘</p><h4 className="text-4xl font-black tabular-nums">${stats.balance.toLocaleString()}</h4></div>
+                                    <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm"><p className="text-emerald-500 text-xs font-black uppercase mb-1">年度總收入</p><h4 className="text-4xl font-black text-emerald-600 tabular-nums">+${stats.income.toLocaleString()}</h4></div>
+                                    <div className="bg-white rounded-[2rem] p-8 border border-slate-200 shadow-sm"><p className="text-rose-500 text-xs font-black uppercase mb-1">年度總支出</p><h4 className="text-4xl font-black text-rose-500 tabular-nums">-${stats.expense.toLocaleString()}</h4></div>
                                 </div>
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                                     <div className="lg:col-span-2 bg-white rounded-[2.5rem] p-8 md:p-10 border border-slate-200 shadow-sm">
-                                        <h3 className="text-xl font-black flex items-center gap-2 mb-10"><Icon name="calendar" className="text-blue-600" /> 月度收支趨勢</h3>
-                                        <div className="h-64 flex items-end justify-between gap-2 md:gap-4 px-2">
+                                        <h3 className="text-xl font-black flex items-center gap-2 mb-10"><Icon name="bar-chart-2" className="text-blue-600" /> 月度收支趨勢圖</h3>
+                                        <div className="h-64 flex items-end justify-between gap-3 md:gap-6 px-2">
                                             {yearlyAnalytics.monthlyTrend.map((d, i) => (
                                                 <div key={i} className="flex-1 flex flex-col items-center group relative h-full">
-                                                    <div className="w-full flex items-end justify-center gap-0.5 h-full">
-                                                        <div style={{ height: `${(d.income / yearlyAnalytics.maxVal) * 100}%` }} className="w-full max-w-[12px] bg-blue-600 rounded-t-sm transition-all hover:opacity-80"></div>
-                                                        <div style={{ height: `${(d.expense / yearlyAnalytics.maxVal) * 100}%` }} className="w-full max-w-[12px] bg-slate-200 rounded-t-sm transition-all hover:opacity-80"></div>
+                                                    <div className="w-full flex items-end justify-center gap-1 h-full">
+                                                        <div style={{ height: `${(d.income / yearlyAnalytics.maxVal) * 100}%` }} className="w-full max-w-[12px] bg-blue-600 rounded-t-lg transition-all group-hover:bg-blue-400"></div>
+                                                        <div style={{ height: `${(d.expense / yearlyAnalytics.maxVal) * 100}%` }} className="w-full max-w-[12px] bg-slate-200 rounded-t-lg transition-all group-hover:bg-rose-300"></div>
                                                     </div>
-                                                    <span className="text-[10px] font-black text-slate-400 mt-3">{d.month}月</span>
+                                                    <span className="text-[10px] font-black text-slate-400 mt-4">{d.month}月</span>
                                                 </div>
                                             ))}
                                         </div>
                                     </div>
                                     <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-[2.5rem] p-8 border border-amber-100 shadow-sm h-full text-center">
                                         <Icon name="award" size={48} className="text-amber-500 mx-auto mb-4" />
-                                        <h3 className="text-xl font-black mb-6">年度榮譽貢獻</h3>
+                                        <h3 className="text-xl font-black mb-6 text-amber-900 uppercase tracking-widest">年度榮譽貢獻</h3>
                                         <div className="space-y-4 text-left">
                                             {yearlyAnalytics.topContributors.map(([name, count], i) => (
-                                                <div key={i} className="flex justify-between items-center bg-white/60 p-3 rounded-xl border border-amber-200">
-                                                    <span className="font-black">{name}</span>
-                                                    <span className="text-xs font-black text-amber-600">已繳 {count} 次</span>
+                                                <div key={i} className="flex justify-between items-center bg-white/70 p-4 rounded-2xl border border-amber-200 shadow-sm">
+                                                    <span className="font-black text-slate-700">{name}</span>
+                                                    <span className="text-xs font-black text-amber-600 bg-amber-100 px-3 py-1 rounded-full">已繳 {count} 次</span>
                                                 </div>
                                             ))}
                                         </div>
+                                        <p className="mt-8 text-[10px] text-amber-500 font-black uppercase">🎖️ 誠摯感謝各位的成全 🎖️</p>
                                     </div>
                                 </div>
                             </div>
                         )}
 
                         {view === 'admin_entry' && (
-                            <div className="max-w-2xl mx-auto space-y-6">
-                                <div className="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-10 text-slate-800">
-                                    <div className="flex justify-between mb-8">
-                                        <h2 className="text-3xl font-black flex items-center gap-3"><Icon name="plus-circle" className="text-blue-600" size={32} /> 新增紀錄</h2>
-                                        <div className="flex bg-slate-100 p-1 rounded-xl">
-                                            <button onClick={()=>setFormData({...formData,type:'accounting'})} className={`px-4 py-2 rounded-lg text-sm font-bold ${formData.type==='accounting'?'bg-white shadow-sm text-blue-600':'text-slate-400'}`}>流水帳</button>
-                                            <button onClick={()=>setFormData({...formData,type:'member'})} className={`px-4 py-2 rounded-lg text-sm font-bold ${formData.type==='member'?'bg-white shadow-sm text-blue-600':'text-slate-400'}`}>月助</button>
+                            <div className="max-w-3xl mx-auto animate-in slide-in-from-bottom-8">
+                                <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 p-10 text-slate-800">
+                                    <div className="flex justify-between items-center mb-10">
+                                        <h2 className="text-3xl font-black flex items-center gap-3"><Icon name="plus-circle" className="text-blue-600" size={32} /> 新增財務紀錄</h2>
+                                        <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+                                            <button onClick={()=>setFormData({...formData,type:'accounting'})} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type==='accounting'?'bg-white shadow-md text-blue-600':'text-slate-400'}`}>流水帳</button>
+                                            <button onClick={()=>setFormData({...formData,type:'member'})} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type==='member'?'bg-white shadow-md text-blue-600':'text-slate-400'}`}>成員月助</button>
                                         </div>
                                     </div>
-                                    <form onSubmit={handleSubmitEntry} className="space-y-5">
-                                        <div className="grid grid-cols-2 gap-5">
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">日期</label>
-                                                <input type="date" required value={formData.date} onChange={(e)=>setFormData({...formData,date:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold border-none outline-none focus:ring-2 focus:ring-blue-600 transition-all" />
+                                    <form onSubmit={handleSubmitEntry} className="space-y-6">
+                                        <div className="grid grid-cols-2 gap-6">
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">發生日期</label>
+                                                <input type="date" required value={formData.date} onChange={(e)=>setFormData({...formData,date:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-2 border-transparent focus:border-blue-600 outline-none transition-all shadow-inner" />
                                             </div>
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">類別 / 週期</label>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">類別與屬性</label>
                                                 {formData.type === 'accounting' ? (
-                                                    <select value={formData.category} onChange={(e)=>setFormData({...formData,category:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600"><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>
+                                                    <select value={formData.category} onChange={(e)=>setFormData({...formData,category:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner"><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>
                                                 ) : (
                                                     <div className="flex gap-2">
-                                                        <input type="number" placeholder="年" value={formData.year} onChange={(e)=>setFormData({...formData,year:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600" />
-                                                        <select value={formData.month} onChange={(e)=>setFormData({...formData,month:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600">
+                                                        <input type="number" placeholder="年" value={formData.year} onChange={(e)=>setFormData({...formData,year:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" />
+                                                        <select value={formData.month} onChange={(e)=>setFormData({...formData,month:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner">
                                                             {Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{m}月</option>)}
                                                         </select>
                                                     </div>
@@ -585,44 +739,55 @@
                                             </div>
                                         </div>
                                         {formData.type === 'member' && (
-                                            <div className="grid grid-cols-2 gap-5">
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">成員編號</label>
-                                                    <select required value={formData.memberId} onChange={(e)=>{const m=uniqueMembers.find(i=>i.id===e.target.value);setFormData({...formData,memberId:e.target.value,memberName:m?m.name:''});}} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600"><option value="">選擇成員</option>{uniqueMembers.map(m=><option key={m.id} value={m.id}>{m.id} ({m.name})</option>)}<option value="NEW">新成員</option></select>
+                                            <div className="grid grid-cols-2 gap-6 animate-in fade-in">
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">選擇成員 ID</label>
+                                                    <select required value={formData.memberId} onChange={(e)=>{const m=uniqueMembers.find(i=>i.id===e.target.value);setFormData({...formData,memberId:e.target.value,memberName:m?m.name:''});}} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner"><option value="">選擇成員</option>{uniqueMembers.map(m=><option key={m.id} value={m.id}>{m.id} ({m.name})</option>)}<option value="NEW">新成員登錄</option></select>
                                                 </div>
-                                                <div className="space-y-1">
-                                                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">姓名</label>
-                                                    <input type="text" placeholder="姓名" required value={formData.memberName} onChange={(e)=>setFormData({...formData,memberName:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600" readOnly={formData.memberId!=='NEW'}/>
+                                                <div className="space-y-2">
+                                                    <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">姓名</label>
+                                                    <input type="text" placeholder="姓名" required value={formData.memberName} onChange={(e)=>setFormData({...formData,memberName:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" readOnly={formData.memberId!=='NEW'}/>
                                                 </div>
                                             </div>
                                         )}
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">項目說明</label>
-                                            <input type="text" placeholder="請輸入說明" required value={formData.description} onChange={(e)=>setFormData({...formData,description:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600" />
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">細目說明</label>
+                                            <input type="text" placeholder="例：三月份場地維護費" required value={formData.description} onChange={(e)=>setFormData({...formData,description:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" />
                                         </div>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">金額</label>
-                                                <input type="number" placeholder="金額" required value={formData.amount} onChange={(e)=>setFormData({...formData,amount:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold text-xl outline-none border border-transparent focus:border-blue-600" />
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">入帳金額 (支出請填負數)</label>
+                                                <input type="number" placeholder="金額" required value={formData.amount} onChange={(e)=>setFormData({...formData,amount:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-black text-2xl outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" />
                                             </div>
-                                            <div className="space-y-1">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">繳錢方式</label>
-                                                <select value={formData.paymentMethod} onChange={(e)=>setFormData({...formData, paymentMethod: e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600"><option>現金</option><option>郵局</option><option>轉帳</option><option>LinePay</option></select>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">繳費/支付方式</label>
+                                                <select value={formData.paymentMethod} onChange={(e)=>setFormData({...formData, paymentMethod: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner"><option>現金</option><option>郵局</option><option>轉帳</option><option>LinePay</option></select>
                                             </div>
                                         </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">經手人</label>
-                                            <input type="text" placeholder="經手人" required value={formData.handler} onChange={(e)=>setFormData({...formData,handler:e.target.value})} className="w-full px-5 py-4 bg-slate-50 rounded-xl font-bold outline-none border border-transparent focus:border-blue-600" />
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-black uppercase tracking-widest text-slate-400 ml-1">經手人簽章</label>
+                                            <input type="text" placeholder="簽署經手人姓名" required value={formData.handler} onChange={(e)=>setFormData({...formData,handler:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" />
                                         </div>
-                                        <button type="submit" disabled={isLoading} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50">
-                                            {isLoading ? "提交中..." : "儲存資料"}
+                                        <button type="submit" disabled={isLoading} className="w-full bg-blue-600 text-white py-6 rounded-3xl font-black text-2xl shadow-2xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50">
+                                            {isLoading ? <Icon name="refresh-ccw" className="animate-spin inline-block mr-2"/> : <Icon name="save" className="inline-block mr-2"/>}
+                                            {isLoading ? "正在同步中..." : "確認儲存並存入雲端"}
                                         </button>
                                     </form>
                                 </div>
                             </div>
                         )}
                     </main>
-                    <footer className="mt-20 py-16 border-t border-slate-200 text-center text-slate-400 text-sm font-bold uppercase tracking-widest">© 2026 團隊智能財務系統</footer>
+
+                    {/* 頁尾同步資訊 */}
+                    <footer className="mt-20 py-16 border-t border-slate-200 text-center text-slate-400">
+                        <div className="flex items-center justify-center gap-2 mb-4 opacity-50">
+                            <Icon name="refresh-cw" size={14} className={isLoading ? 'animate-spin' : ''}/>
+                            <span className="text-[10px] font-black uppercase tracking-widest">
+                                {lastSync ? `最後同步於: ${lastSync.toLocaleTimeString()}` : '尚未連線'}
+                            </span>
+                        </div>
+                        <p className="text-xs font-bold uppercase tracking-widest">© 2026 團隊智能財務系統 • 公開透明之美</p>
+                    </footer>
                 </div>
             );
         }
