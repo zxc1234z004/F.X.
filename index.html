@@ -45,11 +45,28 @@
 
         // 封裝 Lucide 圖標組件
         const Icon = ({ name, size = 18, className = "" }) => {
-            useEffect(() => {
-                lucide.createIcons();
-            }, [name, size, className]);
-            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
-        };
+    useEffect(() => {
+        // 只有當 name 不是檔案路徑時，才執行 Lucide 初始化
+        if (typeof lucide !== 'undefined' && name && !name.includes('.')) {
+            lucide.createIcons();
+        }
+    }, [name, size, className, view]); // 加入 view 確保切換分頁時圖標會重新掃描
+
+    // 判斷：如果名稱包含點 (如 .png)，則渲染為 <img>
+    if (name && name.includes('.')) {
+        return (
+            <img 
+                src={name} 
+                style={{ width: size, height: size }} 
+                className={`object-contain inline-block ${className}`} 
+                alt="icon"
+                onError={(e) => { e.target.src='https://api.dicebear.com/7.x/initials/svg?seed=FX'; }} 
+            />
+        );
+    }
+
+    return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+};
 
         function App() {
             const [view, setView] = useState('home'); 
@@ -354,17 +371,21 @@
                     )}
 
                     <nav className="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50 px-6 py-4">
-                        <div className="max-w-7xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('home')}>
-                                <div className="bg-blue-600 p-2 rounded-xl text-white">
-                                    <Icon name="逢賢icon.png" size={22} />
-                                </div>
-                                <div class="app-icon-card mx-auto">
-                <img src="逢賢icon.png" alt="Logo"
-                    onerror="this.src='https://api.dicebear.com/7.x/initials/svg?seed=CY&backgroundColor=6366f1';">
-            </div>
-                                <span className="font-black text-xl tracking-tight text-slate-800">逢賢帳務<span className="text-blue-600">管理系統</span></span>
+                       <div className="max-w-7xl mx-auto flex justify-between items-center">
+                          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('home')}>
+                            <div className="shadow-sm">
+                               <Icon name="逢賢icon.png" size={40} className="rounded-xl" />
                             </div>
+            
+                            <div className="flex flex-col">
+                               <span className="font-black text-xl tracking-tighter text-slate-800 leading-none">
+                                        逢賢帳務<span className="text-blue-600">管理系統</span>
+                               </span>
+                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">
+                               Accounting System
+                             </span>
+                           </div>
+                         </div>
                             <div className="hidden lg:flex items-center gap-1">
                                 <NavButton id="home" label="總覽" icon="layout" />
                                 <NavButton id="member_query" label="月助查詢" icon="search" />
