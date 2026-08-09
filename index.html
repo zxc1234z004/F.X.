@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>逢賢財務管理系統</title>
+    <title>逢賢財務管理系統 - 專業版</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel CDN -->
@@ -14,29 +15,64 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+
         body {
             font-family: 'Noto Sans TC', sans-serif;
             -webkit-font-smoothing: antialiased;
         }
+
         .shake {
-            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+            animation: shake 0.5s cubic-bezier(.36, .07, .19, .97) both;
         }
+
         @keyframes shake {
-            10%, 90% { transform: translate3d(-1px, 0, 0); }
-            20%, 80% { transform: translate3d(2px, 0, 0); }
-            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
-            40%, 60% { transform: translate3d(4px, 0, 0); }
+
+            10%,
+            90% {
+                transform: translate3d(-1px, 0, 0);
+            }
+
+            20%,
+            80% {
+                transform: translate3d(2px, 0, 0);
+            }
+
+            30%,
+            50%,
+            70% {
+                transform: translate3d(-4px, 0, 0);
+            }
+
+            40%,
+            60% {
+                transform: translate3d(4px, 0, 0);
+            }
         }
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
         .logo-gradient {
             background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
         }
     </style>
 </head>
+
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
 
@@ -44,7 +80,7 @@
         const { useState, useMemo, useEffect } = React;
 
         // --- 配置區 ---
-        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxZ5IpQpZ-rK50hPeMh3t4VJTdcZeENbipV8xs8bLvRpynhcYJtV5QJWg6nDFZbgsHhWA/exec"; 
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxZ5IpQpZ-rK50hPeMh3t4VJTdcZeENbipV8xs8bLvRpynhcYJtV5QJWg6nDFZbgsHhWA/exec";
 
         // 封裝 Lucide 圖標組件
         const Icon = ({ name, size = 18, className = "" }) => {
@@ -55,11 +91,11 @@
         };
 
         function App() {
-            const [view, setView] = useState('home'); 
-            const [searchQuery, setSearchQuery] = useState(''); 
-            const [memberData, setMemberData] = useState(null); 
-            const [allMembersData, setAllMembersData] = useState([]); 
-            const [accountingData, setAccountingData] = useState([]); 
+            const [view, setView] = useState('home');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [memberData, setMemberData] = useState(null);
+            const [allMembersData, setAllMembersData] = useState([]);
+            const [accountingData, setAccountingData] = useState([]);
             const [isLoading, setIsLoading] = useState(false);
             const [isMenuOpen, setIsMenuOpen] = useState(false);
             const [error, setError] = useState(null);
@@ -68,7 +104,7 @@
 
             // 管理員狀態
             const [isAdmin, setIsAdmin] = useState(false);
-            const [adminPassword, setAdminPassword] = useState(''); 
+            const [adminPassword, setAdminPassword] = useState('');
             const [passwordInput, setPasswordInput] = useState('');
             const [showLoginModal, setShowLoginModal] = useState(false);
             const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -90,7 +126,7 @@
                 year: new Date().getFullYear().toString(),
                 month: (new Date().getMonth() + 1).toString(),
                 status: '已繳',
-                paymentMethod: '現金' 
+                paymentMethod: '現金'
             });
 
             const [formData, setFormData] = useState(getDefaultFormData());
@@ -116,7 +152,7 @@
             const downloadCSV = (data, filename) => {
                 if (!data || data.length === 0) return;
                 const headers = Object.keys(data[0]).join(',');
-                const rows = data.map(row => 
+                const rows = data.map(row =>
                     Object.values(row).map(val => `"${val.toString().replace(/"/g, '""')}"`).join(',')
                 ).join('\n');
                 const csvContent = "\uFEFF" + headers + '\n' + rows;
@@ -169,26 +205,61 @@
                 finally { setIsLoading(false); }
             };
 
+            // 欄位規格化函數 (容錯處理大小寫與中文標頭)
+            const normalizeMemberRow = (m) => {
+                if (!m) return {};
+                const id = (m.MemberID || m.memberId || m.MemberId || m.id || m['成員編號'] || m['ID'] || '').toString().trim();
+                const name = (m.Name || m.memberName || m.MemberName || m.name || m['姓名'] || '').toString().trim();
+                const year = Number(m.Year || m.year || m['年份'] || m['年'] || 0);
+                const month = Number(m.Month || m.month || m['月份'] || m['月'] || 0);
+                const amount = Number(m.Amount || m.amount || m['金額'] || 0);
+
+                let status = (m.Status || m.status || m['狀態'] || m['2000'] || '').toString().trim();
+                if (status !== '已繳' && status !== '未繳') {
+                    const foundStatus = Object.values(m).find(v => typeof v === 'string' && (v.trim() === '已繳' || v.trim() === '未繳'));
+                    if (foundStatus) {
+                        status = foundStatus.trim();
+                    } else if (amount > 0) {
+                        status = '已繳';
+                    } else {
+                        status = '未繳';
+                    }
+                }
+                const date = (m.Date || m.date || m['日期'] || '').toString().trim();
+                return { id, name, year, month, status, amount, date };
+            };
+
             const memberStats = useMemo(() => {
                 const stats = {};
-                allMembersData.forEach(m => {
-                    if (!m.MemberID) return;
-                    if (!stats[m.MemberID]) {
-                        stats[m.MemberID] = { id: m.MemberID, name: m.Name, totalPaid: 0, count: 0, lastPaid: '' };
+                allMembersData.forEach(raw => {
+                    const m = normalizeMemberRow(raw);
+                    if (!m.id) return;
+                    if (!stats[m.id]) {
+                        stats[m.id] = { id: m.id, name: m.name, totalPaid: 0, count: 0, lastPaid: '' };
                     }
-                    if (m.Status === '已繳') {
-                        stats[m.MemberID].totalPaid += Number(m.Amount || 0);
-                        stats[m.MemberID].count += 1;
-                        const dateKey = `${m.Year}/${m.Month}`;
-                        if (!stats[m.MemberID].lastPaid || dateKey > stats[m.MemberID].lastPaid) {
-                            stats[m.MemberID].lastPaid = dateKey;
+                    if (m.status === '已繳') {
+                        stats[m.id].totalPaid += m.amount;
+                        stats[m.id].count += 1;
+                        const dateKey = `${m.year}/${m.month}`;
+                        if (!stats[m.id].lastPaid || dateKey > stats[m.id].lastPaid) {
+                            stats[m.id].lastPaid = dateKey;
                         }
                     }
                 });
                 return Object.values(stats).sort((a, b) => b.totalPaid - a.totalPaid);
             }, [allMembersData]);
 
-            const uniqueMembers = useMemo(() => memberStats.map(s => ({ id: s.id, name: s.name })), [memberStats]);
+            // 提煉不重複成員名冊 (不再受限於必須有已繳紀錄)
+            const uniqueMembers = useMemo(() => {
+                const memberMap = new Map();
+                allMembersData.forEach(raw => {
+                    const m = normalizeMemberRow(raw);
+                    if (m.id && !memberMap.has(m.id)) {
+                        memberMap.set(m.id, m.name || m.id);
+                    }
+                });
+                return Array.from(memberMap.entries()).map(([id, name]) => ({ id, name }));
+            }, [allMembersData]);
 
             const yearlyAnalytics = useMemo(() => {
                 const targetYear = Number(selectedYear);
@@ -206,8 +277,9 @@
                     }
                 });
                 const contributorMap = {};
-                allMembersData.forEach(m => {
-                    if (Number(m.Year) === targetYear && m.Status === '已繳') contributorMap[m.Name] = (contributorMap[m.Name] || 0) + 1;
+                allMembersData.forEach(raw => {
+                    const m = normalizeMemberRow(raw);
+                    if (m.year === targetYear && m.status === '已繳') contributorMap[m.name] = (contributorMap[m.name] || 0) + 1;
                 });
                 const topContributors = Object.entries(contributorMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
                 const maxVal = Math.max(...monthlyTrend.map(d => Math.max(d.income, d.expense)), 1000);
@@ -219,15 +291,18 @@
                 const now = new Date();
                 const START_YEAR = 2026;
                 const paidSet = new Set();
-                allMembersData.forEach(m => {
-                    if (m.Status === '已繳') {
-                        paidSet.add(`${m.MemberID}-${m.Year}-${m.Month}`);
-                        const key = `${m.Year}-${m.Month}`;
+
+                allMembersData.forEach(raw => {
+                    const m = normalizeMemberRow(raw);
+                    if (m.status === '已繳') {
+                        paidSet.add(`${m.id}-${m.year}-${m.month}`);
+                        const key = `${m.year}-${m.month}`;
                         if (!monthlyData[key]) monthlyData[key] = { collected: 0, count: 0 };
-                        monthlyData[key].collected += Number(m.Amount || 0);
+                        monthlyData[key].collected += m.amount;
                         monthlyData[key].count += 1;
                     }
                 });
+
                 const autoDetectedUnpaid = [];
                 uniqueMembers.forEach(member => {
                     for (let y = START_YEAR; y <= now.getFullYear(); y++) {
@@ -269,9 +344,9 @@
                     const response = await fetch(`${GAS_WEB_APP_URL}?action=checkAuth&password=${encodeURIComponent(passwordInput)}`);
                     const result = await response.json();
                     if (result.success) {
-                        setIsAdmin(true); 
-                        setAdminPassword(passwordInput); 
-                        setShowLoginModal(false); 
+                        setIsAdmin(true);
+                        setAdminPassword(passwordInput);
+                        setShowLoginModal(false);
                         setPasswordInput('');
                         setError(null);
                     } else { setError("授權密碼不正確。"); }
@@ -284,9 +359,9 @@
                 try {
                     const action = formData.type === 'accounting' ? 'addAccounting' : 'addMemberRecord';
                     // 關鍵修復：移除自定義 Header 以避免 OPTIONS 預檢失敗
-                    const response = await fetch(GAS_WEB_APP_URL, { 
-                        method: 'POST', 
-                        body: JSON.stringify({ action, ...formData, password: adminPassword }) 
+                    const response = await fetch(GAS_WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action, ...formData, password: adminPassword })
                     });
                     const result = await response.json();
                     if (result.success) {
@@ -306,7 +381,7 @@
 
             return (
                 <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-700">
-                    
+
                     {/* 授權驗證 Modal */}
                     {showLoginModal && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-6">
@@ -359,7 +434,7 @@
                     <main className="max-w-7xl mx-auto p-4 md:p-8 min-h-[70vh]">
                         {successMsg && <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-center gap-2 text-emerald-600 font-bold animate-in fade-in"><Icon name="check-circle" /> {successMsg}</div>}
                         {error && <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center justify-between text-rose-600 font-bold shake"><div className="flex items-center gap-2"><Icon name="alert-circle" /> {error}</div><button onClick={() => setError(null)}><Icon name="x" size={18} /></button></div>}
-                        
+
                         {/* 總覽頁面 */}
                         {view === 'home' && (
                             <div className="space-y-8 animate-in fade-in duration-500">
@@ -374,10 +449,10 @@
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                                    <div onClick={() => setView('member_query')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-blue-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="search" size={32} className="mb-4 text-blue-600"/><h3 className="font-black text-xl mb-2 text-slate-800">個人查詢</h3><p className="text-slate-500 text-sm">輸入姓名或 ID 查詢年度繳費狀況。</p></div>
-                                    <div onClick={() => setView('admin_reports')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-rose-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="history" size={32} className="mb-4 text-rose-600"/><h3 className="font-black text-xl mb-2 text-slate-800">自動對帳</h3><p className="text-slate-500 text-sm">智能偵測漏繳月份與待補金額。</p></div>
-                                    <div onClick={() => setView('admin_members')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-indigo-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="users" size={32} className="mb-4 text-indigo-600"/><h3 className="font-black text-xl mb-2 text-slate-800">成員管理</h3><p className="text-slate-500 text-sm">查看成員歷史貢獻總額統計。</p></div>
-                                    <div onClick={() => setView('admin_yearly')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-amber-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="pie-chart" size={32} className="mb-4 text-amber-600"/><h3 className="font-black text-xl mb-2 text-slate-800">年度分析</h3><p className="text-slate-500 text-sm">全年度資金趨勢與類別分析。</p></div>
+                                    <div onClick={() => setView('member_query')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-blue-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="search" size={32} className="mb-4 text-blue-600" /><h3 className="font-black text-xl mb-2 text-slate-800">個人查詢</h3><p className="text-slate-500 text-sm">輸入姓名或 ID 查詢年度繳費狀況。</p></div>
+                                    <div onClick={() => setView('admin_reports')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-rose-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="history" size={32} className="mb-4 text-rose-600" /><h3 className="font-black text-xl mb-2 text-slate-800">自動對帳</h3><p className="text-slate-500 text-sm">智能偵測漏繳月份與待補金額。</p></div>
+                                    <div onClick={() => setView('admin_members')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-indigo-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="users" size={32} className="mb-4 text-indigo-600" /><h3 className="font-black text-xl mb-2 text-slate-800">成員管理</h3><p className="text-slate-500 text-sm">查看成員歷史貢獻總額統計。</p></div>
+                                    <div onClick={() => setView('admin_yearly')} className="bg-white p-8 rounded-[2rem] border border-slate-200 hover:border-amber-500 cursor-pointer shadow-sm transition-all hover:-translate-y-1"><Icon name="pie-chart" size={32} className="mb-4 text-amber-600" /><h3 className="font-black text-xl mb-2 text-slate-800">年度分析</h3><p className="text-slate-500 text-sm">全年度資金趨勢與類別分析。</p></div>
                                 </div>
                             </div>
                         )}
@@ -425,7 +500,7 @@
                                     <div className="flex gap-2"><button onClick={() => downloadCSV(accountingData, 'FengXian')} className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 shadow-sm transition-all"><Icon name="download" size={16} className="inline mr-1" /> 匯出</button><button onClick={fetchAccounting} className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm transition-all"><Icon name="refresh-ccw" className={isLoading ? 'animate-spin text-blue-600' : ''} /></button></div>
                                 </div>
                                 <div className="bg-white p-4 rounded-3xl border border-slate-200 flex flex-wrap gap-4 items-center">
-                                    <select value={filterCategory} onChange={(e)=>setFilterCategory(e.target.value)} className="bg-slate-50 px-4 py-2 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-blue-600 transition-all"><option>全部</option><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>
+                                    <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="bg-slate-50 px-4 py-2 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-blue-600 transition-all"><option>全部</option><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>
                                     <div className="ml-auto text-xs text-slate-400 font-bold uppercase tracking-widest">顯示 {filteredAccounting.length} 筆資料</div>
                                 </div>
                                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
@@ -438,8 +513,8 @@
                         {view === 'admin_reports' && (
                             <div className="space-y-8 animate-in slide-in-from-bottom-8">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                                   <div><h2 className="text-3xl font-black flex items-center gap-3 text-slate-800"><Icon name="history" size={32} className="text-blue-600" /> 漏繳自動追蹤</h2><p className="text-slate-500 font-medium text-lg">系統自動比對名冊與實收紀錄，列出缺失月份。</p></div>
-                                   <button onClick={fetchAllMembers} className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 font-black text-slate-600 shadow-sm transition-all"><Icon name="refresh-ccw" size={18} className={isLoading ? 'animate-spin' : ''} /><span>重新對帳</span></button>
+                                    <div><h2 className="text-3xl font-black flex items-center gap-3 text-slate-800"><Icon name="history" size={32} className="text-blue-600" /> 漏繳自動追蹤</h2><p className="text-slate-500 font-medium text-lg">系統自動比對名冊與實收紀錄，列出缺失月份。</p></div>
+                                    <button onClick={fetchAllMembers} className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-2xl hover:bg-slate-50 font-black text-slate-600 shadow-sm transition-all"><Icon name="refresh-ccw" size={18} className={isLoading ? 'animate-spin' : ''} /><span>重新對帳</span></button>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div className="bg-rose-600 p-8 rounded-[2rem] text-white shadow-xl flex flex-col justify-center text-center"><p className="text-rose-200 text-xs font-black uppercase mb-1">偵測漏繳人次</p><h4 className="text-5xl font-black tabular-nums">{reportStats.unpaidList.length} <span className="text-lg font-normal opacity-60">筆</span></h4></div>
@@ -457,8 +532,8 @@
                                     </div>
                                 </div>
                                 <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden">
-                                    <div className="bg-rose-50 px-8 py-5 border-b border-rose-100 flex justify-between items-center"><h3 className="font-black text-rose-700 flex items-center gap-2 text-lg"><Icon name="alert-circle" size={20}/> 年度漏繳清單</h3><span className="text-xs bg-rose-200 text-rose-700 px-4 py-1.5 rounded-full font-black">待補筆數: {reportStats.unpaidList.length}</span></div>
-                                    <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50/50 border-b border-slate-100"><tr><th className="px-8 py-4 text-xs font-black uppercase text-slate-400">成員</th><th className="px-8 py-4 text-xs font-black uppercase text-slate-400 text-center">缺失月份</th></tr></thead><tbody className="divide-y divide-slate-50">{reportStats.unpaidList.map((row, idx) => (<tr key={idx} className="hover:bg-rose-50/20 transition-colors"><td className="px-8 py-5"><div className="font-black text-slate-800 text-lg">{row.Name}</div><div className="text-[10px] text-slate-400 font-bold uppercase">{row.MemberID}</div></td><td className="px-8 py-5 text-center"><span className="px-4 py-1 bg-white text-rose-600 border border-rose-100 rounded-lg text-xs font-black shadow-sm">{row.Year}年 {row.Month}月</span></td></tr>))}</tbody></table></div>
+                                    <div className="bg-rose-50 px-8 py-5 border-b border-rose-100 flex justify-between items-center"><h3 className="font-black text-rose-700 flex items-center gap-2 text-lg"><Icon name="alert-circle" size={20} /> 年度漏繳清單</h3><span className="text-xs bg-rose-200 text-rose-700 px-4 py-1.5 rounded-full font-black">待補筆數: {reportStats.unpaidList.length}</span></div>
+                                    <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-50/50 border-b border-slate-100"><tr><th className="px-8 py-4 text-xs font-black uppercase text-slate-400">成員</th><th className="px-8 py-4 text-xs font-black uppercase text-slate-400 text-center">缺失月份</th><th className="px-8 py-4 text-xs font-black uppercase text-slate-400 text-right">備註說明</th></tr></thead><tbody className="divide-y divide-slate-50">{reportStats.unpaidList.map((row, idx) => (<tr key={idx} className="hover:bg-rose-50/20 transition-colors"><td className="px-8 py-5"><div className="font-black text-slate-800 text-lg">{row.Name}</div><div className="text-[10px] text-slate-400 font-bold uppercase">{row.MemberID}</div></td><td className="px-8 py-5 text-center"><span className="px-4 py-1 bg-white text-rose-600 border border-rose-100 rounded-lg text-xs font-black shadow-sm">{row.Year}年 {row.Month}月</span></td><td className="px-8 py-5 text-right font-bold text-slate-400 text-xs italic">{row.Reason}</td></tr>))}</tbody></table></div>
                                 </div>
                             </div>
                         )}
@@ -519,21 +594,21 @@
                         {view === 'admin_entry' && (
                             <div className="max-w-3xl mx-auto animate-in slide-in-from-bottom-8">
                                 <div className="bg-white rounded-[3rem] shadow-2xl border border-slate-200 p-10 text-slate-800">
-                                    <div className="flex justify-between items-center mb-10"><h2 className="text-3xl font-black flex items-center gap-3"><Icon name="plus-circle" className="text-blue-600" size={32} /> 新增財務紀錄</h2><div className="flex bg-slate-100 p-1.5 rounded-2xl"><button onClick={()=>handleTypeSwitch('accounting')} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type==='accounting'?'bg-white shadow-md text-blue-600':'text-slate-400 hover:text-slate-600'}`}>流水帳</button><button onClick={()=>handleTypeSwitch('member')} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type==='member'?'bg-white shadow-md text-blue-600':'text-slate-400'}`}>成員月助</button></div></div>
+                                    <div className="flex justify-between items-center mb-10"><h2 className="text-3xl font-black flex items-center gap-3"><Icon name="plus-circle" className="text-blue-600" size={32} /> 新增財務紀錄</h2><div className="flex bg-slate-100 p-1.5 rounded-2xl"><button onClick={() => handleTypeSwitch('accounting')} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type === 'accounting' ? 'bg-white shadow-md text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>流水帳</button><button onClick={() => handleTypeSwitch('member')} className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all ${formData.type === 'member' ? 'bg-white shadow-md text-blue-600' : 'text-slate-400'}`}>成員月助</button></div></div>
                                     <form onSubmit={handleSubmitEntry} className="space-y-6">
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">發生日期</label><input type="date" required value={formData.date} onChange={(e)=>setFormData({...formData,date:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-2 border-transparent focus:border-blue-600 outline-none shadow-inner transition-all" /></div>
-                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">類別 / 週期</label>{formData.type === 'accounting' ? (<select value={formData.category} onChange={(e)=>setFormData({...formData,category:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner transition-all"><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>) : (<div className="flex gap-2"><input type="number" placeholder="年" value={formData.year} onChange={(e)=>setFormData({...formData,year:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /><select value={formData.month} onChange={(e)=>setFormData({...formData,month:e.target.value})} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner">{Array.from({length:12},(_,i)=>i+1).map(m=><option key={m} value={m}>{m}月</option>)}</select></div>)}</div>
+                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">發生日期</label><input type="date" required value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-2 border-transparent focus:border-blue-600 outline-none shadow-inner transition-all" /></div>
+                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">類別 / 週期</label>{formData.type === 'accounting' ? (<select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner transition-all"><option>月助收入</option><option>個人了愿</option><option>外部捐款</option><option>行政支出</option><option>活動支出</option></select>) : (<div className="flex gap-2"><input type="number" placeholder="年" value={formData.year} onChange={(e) => setFormData({ ...formData, year: e.target.value })} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /><select value={formData.month} onChange={(e) => setFormData({ ...formData, month: e.target.value })} className="w-1/2 px-4 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner">{Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}月</option>)}</select></div>)}</div>
                                         </div>
-                                        {formData.type === 'member' && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-6 animate-in fade-in"><div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">成員 ID</label><select required value={formData.memberId} onChange={(e)=>{const m=uniqueMembers.find(i=>i.id===e.target.value);setFormData({...formData,memberId:e.target.value,memberName:m?m.name:''});}} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner"><option value="">選擇成員</option>{uniqueMembers.map(m=><option key={m.id} value={m.id}>{m.id} ({m.name})</option>)}<option value="NEW">新成員手動錄入</option></select></div><div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">成員姓名</label><input type="text" placeholder="姓名" required value={formData.memberName} onChange={(e)=>setFormData({...formData,memberName:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner" readOnly={formData.memberId!=='NEW'}/></div></div>)}
-                                        <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">項目細節說明</label><input type="text" placeholder="例：三月份道務資助" required value={formData.description} onChange={(e)=>setFormData({...formData,description:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /></div>
+                                        {formData.type === 'member' && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-6 animate-in fade-in"><div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">成員 ID</label><select required value={formData.memberId} onChange={(e) => { const m = uniqueMembers.find(i => i.id === e.target.value); setFormData({ ...formData, memberId: e.target.value, memberName: m ? m.name : '' }); }} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner"><option value="">選擇成員</option>{uniqueMembers.map(m => <option key={m.id} value={m.id}>{m.id} ({m.name})</option>)}<option value="NEW">新成員手動錄入</option></select></div><div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">成員姓名</label><input type="text" placeholder="姓名" required value={formData.memberName} onChange={(e) => setFormData({ ...formData, memberName: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner" readOnly={formData.memberId !== 'NEW'} /></div></div>)}
+                                        <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">項目細節說明</label><input type="text" placeholder="例：三月份道務資助" required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /></div>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">金額 (支出請填負數)</label><input type="number" placeholder="金額" required value={formData.amount} onChange={(e)=>setFormData({...formData,amount:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-black text-2xl outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /></div>
-                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">繳費管道</label><select value={formData.paymentMethod} onChange={(e)=>setFormData({...formData, paymentMethod: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner"><option>現金</option><option>郵局</option><option>轉帳</option><option>LinePay</option></select></div>
+                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">金額 (支出請填負數)</label><input type="number" placeholder="金額" required value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-black text-2xl outline-none border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" /></div>
+                                            <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">繳費管道</label><select value={formData.paymentMethod} onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-600 shadow-inner"><option>現金</option><option>郵局</option><option>轉帳</option><option>LinePay</option></select></div>
                                         </div>
-                                        <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">經手人簽名</label><input type="text" placeholder="請簽署姓名" required value={formData.handler} onChange={(e)=>setFormData({...formData,handler:e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none shadow-inner border-2 border-transparent focus:border-blue-600 transition-all" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black uppercase text-slate-400 ml-1">經手人簽名</label><input type="text" placeholder="請簽署姓名" required value={formData.handler} onChange={(e) => setFormData({ ...formData, handler: e.target.value })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none shadow-inner border-2 border-transparent focus:border-blue-600 transition-all" /></div>
                                         <button type="submit" disabled={isLoading} className="w-full bg-blue-600 text-white py-6 rounded-3xl font-black text-2xl shadow-2xl hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50">
-                                            {isLoading ? <Icon name="refresh-ccw" className="animate-spin inline-block mr-2"/> : <Icon name="save" className="inline mr-2" />} 儲存並同步至雲端
+                                            {isLoading ? <Icon name="refresh-ccw" className="animate-spin inline-block mr-2" /> : <Icon name="save" className="inline mr-2" />} 儲存並同步至雲端
                                         </button>
                                     </form>
                                 </div>
@@ -542,8 +617,8 @@
                     </main>
 
                     <footer className="mt-20 py-16 border-t border-slate-200 text-center text-slate-400">
-                        <div className="flex items-center justify-center gap-2 mb-4 opacity-50"><Icon name="refresh-cw" size={14} className={isLoading ? 'animate-spin' : ''}/><span className="text-[10px] font-black uppercase tracking-widest">{lastSync ? `最後同步於: ${lastSync.toLocaleTimeString()}` : '尚未連線雲端資料庫'}</span></div>
-                        <p className="text-xs font-bold uppercase tracking-widest">© 2026 逢賢財務管理系統</p>
+                        <div className="flex items-center justify-center gap-2 mb-4 opacity-50"><Icon name="refresh-cw" size={14} className={isLoading ? 'animate-spin' : ''} /><span className="text-[10px] font-black uppercase tracking-widest">{lastSync ? `最後同步於: ${lastSync.toLocaleTimeString()}` : '尚未連線雲端資料庫'}</span></div>
+                        <p className="text-xs font-bold uppercase tracking-widest">© 2026 逢賢財務管理系統 • 專業誠信之美</p>
                     </footer>
                 </div>
             );
@@ -553,4 +628,5 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
